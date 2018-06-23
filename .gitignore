@@ -2,4 +2,4 @@
 build/*
 
 # Google Test
-unit_tests/googletest
+googletest

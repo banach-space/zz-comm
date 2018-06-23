@@ -1,0 +1,15 @@
+dist: trusty
+language: cpp
+compiler:
+  - clang
+  - gcc
+script:
+  # CLONE AND BUILD GTEST
+  - git clone https://github.com/google/googletest.git
+  # BUILD ZZ_SYNTH
+  - mkdir build
+  - cd build
+  - cmake  -DCMAKE_BUILD_TYPE=Release ../
+  - make
+  # RUN UNIT TESTS
+  - ./Boggle-UnitTest
