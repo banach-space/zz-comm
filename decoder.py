@@ -5,6 +5,8 @@ Edition 5.1, Section 4.7.
 '''
 
 import random
+import itertools
+import math
 import numpy as np
 
 
@@ -262,35 +264,42 @@ class GloHammingEncoder:
 
 class GalConvCode:
     def __init__(self, input_bits, invert_second_branch = False):
+        # As per Galilelo ICD (p. 24, Figure 13), the second branch of the
+        # encoder is inverted. Use this parameter to set the inversion
+        # on and off.
+        self.invert_second_branch = invert_second_branch
         self.data_bits = input_bits
         self.output_bits = np.zeros(2*len(input_bits))
-        self.invert_second_branch = invert_second_branch
 
+    # The generator polynomials as specified in the Galilelo ICD, p. 26, Table
+    # 23.
     G1 = [1, 1, 1, 0, 0, 1]
     G2 = [0, 1, 1, 0, 1, 1]
+
+    def poly_eval(self, state, bit):
+        out_g1 = bit
+        for index_g1, val in enumerate(state):
+            if 1 == self.G1[index_g1]:
+                out_g1 = int(bool(val) ^ bool(out_g1))
+
+        out_g2 = bit
+        for index_g2, val in enumerate(state):
+            if 1 == self.G2[index_g2]:
+                out_g2 = int(bool(val) ^ bool(out_g2))
+
+        return (out_g1, out_g2)
 
     def encode(self):
         prev_val = [0] * 6
 
         for index, input_val in enumerate(self.data_bits):
-            # Calculate out1
-            out = input_val
-            for index_g1, val in enumerate(prev_val):
-                if 1 == self.G1[index_g1]:
-                    out = int(bool(val) ^ bool(out))
-            self.output_bits[2*index] = out
-
-            # Calculate out2
-            out = input_val
-            for index_g2, val in enumerate(prev_val):
-                if 1 == self.G2[index_g2]:
-                    out = int(bool(val) ^ bool(out))
-            self.output_bits[2*index+1] = int(bool(out))
+            out1, out2 = self.poly_eval(prev_val, input_val)
+            self.output_bits[2*index] = out1
+            self.output_bits[2*index+1] = out2
 
             prev_val.pop()
             prev_val.insert(0, input_val)
 
-        print(self.output_bits)
         if self.invert_second_branch:
             for ind, sym in enumerate(self.output_bits):
                 if ind % 2 == 1:
@@ -299,59 +308,100 @@ class GalConvCode:
         f = lambda x:-1 if x == 1 else 1
         self.output_bits = [f(x) for x in self.output_bits]
 
+    def decode(self, msg):
+        f = lambda x:1 if x == -1 else 0
+        msg = [f(x) for x in msg]
+        print(msg)
+
+        class TrelisNode:
+           def  __init__(self, visited, error, ancestor):
+                self.visited = visited
+                self.error = error
+                self.ancestor = ancestor
+
+           def __str__(self):
+               return "".join([str(self.visited), ' {:^3} '.format(str(self.error)), str(self.ancestor)])
+
+
+        trelis = [[TrelisNode(0, math.inf, 0) for n in range(64)] for nn in range(int(len(msg)/2 + 1))]
+        # trelis = [[TrelisNode(0, math.inf, 0) for n in range(64)] for nn in range(10)]
+        trelis[0][0].visited = 1
+
+        # states = [[].append(seq) for seq in itertools.product([0,1], repeat=6)]
+        states_str = ["".join(seq) for seq in itertools.product("01", repeat=6)]
+        states = [list(word) for word in states_str]
+
+        for ii, column in enumerate(trelis[:-1]):
+            for current_state_idx, node in enumerate(column):
+                if 1 == node.visited:
+                    # THESE INDICES ARE WRONG!!!
+                    idx_1 = 2*ii
+                    idx_2 = 2*ii + 1
+
+                    state_temp = [int(n) for n in states[current_state_idx]]
+                    out = self.poly_eval(state_temp, 0)
+                    error = abs(msg[idx_1] - out[0]) + abs(msg[idx_2] - out[1])
+                    # print("MESSAGE {} {}".format(msg[idx_1], msg[idx_2]))
+
+                    # The affected state
+                    state_new_zero = states[current_state_idx][:-1]
+                    state_new_zero.insert(0, '0')
+                    next_state_idx = states.index(state_new_zero)
+
+                    prev_error = 0 if trelis[ii][current_state_idx].error == math.inf else trelis[ii][current_state_idx].error
+                    if (error + prev_error) < trelis[ii+1][next_state_idx].error:
+                        trelis[ii+1][next_state_idx].visited = 1
+                        trelis[ii+1][next_state_idx].ancestor = current_state_idx
+                        trelis[ii+1][next_state_idx].error = error + prev_error
+                        # print("COLUMN: {} CURRENT STATE: {} NEXT STATE: {} ERROR: {} STATE: {}".format(ii, current_state_idx, next_state_idx, trelis[ii+1][next_state_idx].error, state_new_zero))
+
+                    state_temp = [int(n) for n in states[current_state_idx]]
+                    out = self.poly_eval(state_temp, 1)
+                    error = abs(msg[idx_1] - out[0]) + abs(msg[idx_2] - out[1])
+
+                    # The affected state
+                    state_new_one = states[current_state_idx][:-1]
+                    state_new_one.insert(0, '1')
+                    next_state_idx = states.index(state_new_one)
+
+                    prev_error = 0 if trelis[ii][current_state_idx].error == math.inf else trelis[ii][current_state_idx].error
+                    if (error + prev_error) < trelis[ii+1][next_state_idx].error:
+                        trelis[ii+1][next_state_idx].visited = 1
+                        trelis[ii+1][next_state_idx].ancestor = current_state_idx
+                        trelis[ii+1][next_state_idx].error = error + prev_error
+                        # print("COLUMN: {} CURRENT STATE: {} NEXT STATE: {} ERROR: {} STATE: {}".format(ii, current_state_idx, next_state_idx, trelis[ii+1][next_state_idx].error, state_new_one))
+
+        values = [value for value in trelis[len(trelis)-1] if value.error == 0]
+        idx_start = trelis[len(trelis)-1].index(values[0])
+        print(values)
+        print("TATATATATA")
+        msg_tx = []
+        print(msg_tx)
+        for column in reversed(trelis[1:]):
+            print(states[idx_start][0], idx_start)
+            # TODO Better deal with int vs char
+            msg_tx.insert(0, int(states[idx_start][0]))
+            idx_start = column[idx_start].ancestor
+        column = trelis[len(trelis)-1]
+        # for item in column:
+        #     print(item.error)
+        # print(msg_tx)
+        # print(len(msg_tx))
+        return(msg_tx)
 
 def func():
-    # data_in = [0,1,1,0,1,1,1,0,0,1,0,1,1,0,1,1,1,1,0,0,1,0,1,1,0,1,0,1,1,1,0,1,
-    #            0,1,0,1,1,1,1,1,1,0,1,1,0,1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,
-    #            0,0,0,1,1,0,0,1,1,0,0,1,0,1,0,0,0,1,0,1,1]
-    # data_in = [0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1,
-    #            0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1,
-    #            1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
-    #            0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0]
-    # data_in = np.zeros(77)
-    # encoder = GloHammingEncoder(data_in)
-    # bits_out = encoder.encode()
-    # print(bits_out)
-    # bits_out = np.zeros(85)
-    # bits_out[77] = 1
-    # print(bits_out)
-    # decoder = GloHammingDecoder(bits_out)
-    # print(decoder.decode())
-
-    # data_in = [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,0,1,0,0,0,0,1,0,0,0,1,0,0,1,0,1,1,1,0,0,0,1,0,0,1,0,1,1,1,1,1,1,0,1]
     data_in = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1,
             0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1,
             1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0]
-    print(data_in)
+    # data_in = [ 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0]
     encoder = GalConvCode(data_in)
     encoder.encode()
-
     print(encoder.output_bits)
 
-def xorbits(n):
-    result = 0
-    while n > 0:
-        result ^= (n & 1)
-        n >>= 1
-    return result
-
-def convolutional_encoder(bits, k, glist):
-    result = []
-    state = 0
-    for b in bits:
-        state = (b << (k-1)) + (state >> 1)
-        for g in glist:
-            result.append(xorbits(state & g))
-    return numpy.array(result)
-
+    encoder.decode(encoder.output_bits)
 
 if __name__ == "__main__":
-    DATA_IN = [0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1,
-               0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1,
-               1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
-               0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1]
-    # DECODER = GLOHAMMINGDECODER(DATA_IN)
-    # print(decoder.decode())
+    func()
