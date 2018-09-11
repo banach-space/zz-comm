@@ -4,7 +4,7 @@ Hamming encoding and decoding for GLONASS as specified in the GLONASS ICD,
 Edition 5.1, Section 4.7.
 '''
 
-import random
+import sys
 import itertools
 import math
 import numpy as np
@@ -82,8 +82,8 @@ class GloHammingDecoder:
         for bit in self.data_bits:
             c_sub_sigma = c_sub_sigma ^ bool(bit)
 
-        self.checksums = [[c_sub_1, c_sub_2, c_sub_3, c_sub_4, c_sub_5, c_sub_6,
-                           c_sub_7], c_sub_sigma]
+        self.checksums = [[c_sub_1, c_sub_2, c_sub_3, c_sub_4, c_sub_5,
+                           c_sub_6, c_sub_7], c_sub_sigma]
 
         print(self.checksums)
 
@@ -217,31 +217,31 @@ class GloHammingEncoder:
 
         for index in self.index_set_i:
             self.parity_bits[7] = int(bool(self.data_bits[85-index])
-                                  ^ bool(self.parity_bits[7]))
+                                      ^ bool(self.parity_bits[7]))
 
         for index in self.index_set_j:
             self.parity_bits[6] = int(bool(self.data_bits[85-index])
-                                  ^ bool(self.parity_bits[6]))
+                                      ^ bool(self.parity_bits[6]))
 
         for index in self.index_set_k:
             self.parity_bits[5] = int(bool(self.data_bits[85-index])
-                                  ^ bool(self.parity_bits[5]))
+                                      ^ bool(self.parity_bits[5]))
 
         for index in self.index_set_l:
             self.parity_bits[4] = int(bool(self.data_bits[85-index])
-                                  ^ bool(self.parity_bits[4]))
+                                      ^ bool(self.parity_bits[4]))
 
         for index in self.index_set_m:
             self.parity_bits[3] = int(bool(self.data_bits[85-index])
-                                  ^ bool(self.parity_bits[3]))
+                                      ^ bool(self.parity_bits[3]))
 
         for index in range(35, 67):
             self.parity_bits[2] = int(bool(self.data_bits[85-index])
-                                  ^ bool(self.parity_bits[2]))
+                                      ^ bool(self.parity_bits[2]))
 
         for index in range(66, 86):
             self.parity_bits[1] = int(bool(self.data_bits[85-index])
-                                  ^ bool(self.parity_bits[1]))
+                                      ^ bool(self.parity_bits[1]))
 
         self.parity_bits[0] = 0
         for val in self.data_bits:
@@ -261,6 +261,7 @@ class GloHammingEncoder:
         print("PARITY BITS:")
         for bit in self.parity_bits:
             print(bit)
+
 
 def encode_single_bit(bit, state):
     ''' Encodes single input bit into two output bits.
@@ -282,10 +283,11 @@ def encode_single_bit(bit, state):
 
     return (out_g1, out_g2)
 
+
 class GalEncoder:
     ''' FEC encoder for the Galilelo GNSS. For reference see section 4.1.4 in the
     Galilelo ICD.'''
-    def __init__(self, input_bits, invert_second_branch = False):
+    def __init__(self, input_bits, invert_second_branch=False):
         # As per Galilelo ICD (p. 24, Figure 13), the second branch of the
         # encoder is inverted. This implementation is a bit more flexible and
         # allows the have this inversion on and off. Use this parameter to
@@ -295,7 +297,7 @@ class GalEncoder:
         self.output_bits = np.zeros(2*len(input_bits))
 
     def encode(self):
-        ''' Encodes self.input_bits and saves the result in self.output_bits.'''
+        ''' Encodes self.input_bits and saves the result in self.output_bits'''
         # As per section 4.2.2.2, the tail bits field consists of 6 zero-value
         # bits enabling completion of the FEC decoding. In other words, the
         # encoder's delay line is initialised with 0s.
@@ -310,19 +312,18 @@ class GalEncoder:
             prev_val.insert(0, input_val)
 
         if self.invert_second_branch:
-            for ind, sym in enumerate(self.output_bits):
+            for ind, _ in enumerate(self.output_bits):
                 if ind % 2 == 1:
                     self.output_bits[ind] = int(not bool(self.output_bits[ind]))
 
         # Transform hard bits to soft bits. Apologies, the mapping is a bit
         # arbitrary
-        f = lambda x:-1 if x == 1 else 1
-        self.output_bits = [f(x) for x in self.output_bits]
+        self.output_bits = [-1 if x == 1 else 1 for x in self.output_bits]
 
 
 class GalDecoder:
     ''' Trelis decoder for the Galilelo GNSS signal.'''
-    def __init__(self, input_bits, invert_second_branch = False):
+    def __init__(self, input_bits, invert_second_branch=False):
         # As per Galilelo ICD (p. 24, Figure 13), the second branch of the
         # encoder is inverted. This implementation is a bit more flexible and
         # allows the have this inversion on and off. Use this parameter to
@@ -338,24 +339,27 @@ class GalDecoder:
 
         # Soft to hard transformation. Apologies, the mapping is a bit
         # arbitrary (matches the encoder implemented in this file).
-        f = lambda x:1 if x == -1 else 0
-        msg = [f(x) for x in self.input_bits]
+        msg = [1 if x == -1 else 0 for x in self.input_bits]
 
         class TrelisNode:
-           ''' Represents a node in the trelis used for decoding.'''
-           def  __init__(self, visited, error, ancestor):
+            ''' Represents a node in the trelis used for decoding.'''
+            def __init__(self, visited, error, ancestor):
                 self.visited = visited
                 self.error = error
                 self.ancestor = ancestor
 
-           def __str__(self):
-               return "".join([str(self.visited), ' {:^3} '.format(str(self.error)), str(self.ancestor)])
+            def __str__(self):
+                return "".join([str(self.visited),
+                                ' {:^3}'.format(str(self.error)),
+                                str(self.ancestor)])
 
         # All possible states
         states = list(itertools.product([0, 1], repeat=6))
 
         # The trelis
-        trelis = [[TrelisNode(0, math.inf, 0) for n in range(len(states))] for nn in range(int(len(msg)/2 + 1))]
+        trelis = [[TrelisNode(0, math.inf, 0)
+                   for n in range(len(states))]
+                  for nn in range(int(len(msg)/2 + 1))]
 
         # We start from 'all 0s' state
         trelis[0][0].visited = 1
@@ -370,49 +374,46 @@ class GalDecoder:
                 # Note that if the previous step not a single state
                 # transitioned into this step then we can skipped it (i.e. it's
                 # not reachable). Otherwise proceed.
-                if 1 == node.visited:
-                    # Message bits corresponding to this column in the trelis
-                    msg_bit_1 = msg[2*column_idx]
-                    msg_bit_2 = msg[2*column_idx+1]
+                if 0 == node.visited:
+                    continue
 
-                    for next_bit in [0, 1]:
-                        out = encode_single_bit(next_bit, states[current_state_idx])
-                        error = abs(msg_bit_1 - out[0]) + abs(msg_bit_2 - out[1])
+                # Message bits corresponding to this column in the trelis
+                msg_bit_1 = msg[2*column_idx]
+                msg_bit_2 = msg[2*column_idx+1]
 
-                        next_state = list(states[current_state_idx][:-1])
-                        next_state.insert(0, next_bit)
-                        next_state_idx = states.index(tuple(next_state))
+                for next_bit in [0, 1]:
+                    out = encode_single_bit(next_bit,
+                                            states[current_state_idx])
+                    error = abs(msg_bit_1 - out[0]) \
+                        + abs(msg_bit_2 - out[1])
 
-                        prev_error = 0 if trelis[column_idx][current_state_idx].error == math.inf else trelis[column_idx][current_state_idx].error
-                        if (error + prev_error) < trelis[column_idx+1][next_state_idx].error:
-                            trelis[column_idx+1][next_state_idx].visited = 1
-                            trelis[column_idx+1][next_state_idx].ancestor = current_state_idx
-                            trelis[column_idx+1][next_state_idx].error = error + prev_error
+                    next_state = list(states[current_state_idx][:-1])
+                    next_state.insert(0, next_bit)
+                    next_state_idx = states.index(tuple(next_state))
 
+                    cur_error = trelis[column_idx][current_state_idx].error
+                    next_error = trelis[column_idx+1][next_state_idx].error
+                    prev_error = 0 if cur_error == math.inf else cur_error
+                    if (error + prev_error) < next_error:
+                        trelis[column_idx+1][next_state_idx].visited = 1
+                        trelis[column_idx+1][next_state_idx].ancestor = \
+                            current_state_idx
+                        trelis[column_idx+1][next_state_idx].error = \
+                            error + prev_error
 
-        values = [value for value in trelis[len(trelis)-1] if value.error == 0]
-        idx_start = trelis[len(trelis)-1].index(values[0])
+        # Get the final state for which the error is 0. Choose the first one
+        # (again, arbitrary choice).
+        nodes_with_zero_error = [node for node in trelis[len(trelis)-1]
+                                 if node.error == 0]
+        idx_start = trelis[len(trelis)-1].index(nodes_with_zero_error[0])
+
+        # Restore the message
         msg_tx = []
         for column in reversed(trelis[1:]):
-            print(states[idx_start][0], idx_start)
-            # TODO Better deal with int vs char
             msg_tx.insert(0, int(states[idx_start][0]))
             idx_start = column[idx_start].ancestor
-        return(msg_tx)
+        return msg_tx
 
-def func():
-    data_in = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1,
-            0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1,
-            1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0]
-    # data_in = [ 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0]
-    encoder = GalDecoder(data_in)
-    encoder.encode()
-    print(encoder.output_bits)
-
-    encoder.decode(encoder.output_bits)
 
 if __name__ == "__main__":
-    func()
+    sys.exit(1)
