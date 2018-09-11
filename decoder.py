@@ -147,7 +147,7 @@ class GloHammingDecoder:
         if self.check_cond_a():
             return True
 
-# Condition b) from GLONASS ICD, Edition 5.1, Section 4.7 (there's one
+        # Condition b) from GLONASS ICD, Edition 5.1, Section 4.7 (there's one
         # corrupted bit that can be fixed)
         if (c_sub_sigma == 1 and checksums.count(1) >= 2):
             # Calculate K from the GLONASS ICD
@@ -262,38 +262,47 @@ class GloHammingEncoder:
         for bit in self.parity_bits:
             print(bit)
 
-class GalConvCode:
-    def __init__(self, input_bits, invert_second_branch = False):
-        # As per Galilelo ICD (p. 24, Figure 13), the second branch of the
-        # encoder is inverted. Use this parameter to set the inversion
-        # on and off.
-        self.invert_second_branch = invert_second_branch
-        self.data_bits = input_bits
-        self.output_bits = np.zeros(2*len(input_bits))
-
+def encode_single_bit(bit, state):
+    ''' Encodes single input bit into two output bits.
+    Requires the state of the delay line (6 previous bits).'''
     # The generator polynomials as specified in the Galilelo ICD, p. 26, Table
     # 23.
     G1 = [1, 1, 1, 0, 0, 1]
     G2 = [0, 1, 1, 0, 1, 1]
 
-    def poly_eval(self, state, bit):
-        out_g1 = bit
-        for index_g1, val in enumerate(state):
-            if 1 == self.G1[index_g1]:
-                out_g1 = int(bool(val) ^ bool(out_g1))
+    out_g1 = bit
+    for index_g1, val in enumerate(state):
+        if 1 == G1[index_g1]:
+            out_g1 = int(bool(val) ^ bool(out_g1))
 
-        out_g2 = bit
-        for index_g2, val in enumerate(state):
-            if 1 == self.G2[index_g2]:
-                out_g2 = int(bool(val) ^ bool(out_g2))
+    out_g2 = bit
+    for index_g2, val in enumerate(state):
+        if 1 == G2[index_g2]:
+            out_g2 = int(bool(val) ^ bool(out_g2))
 
-        return (out_g1, out_g2)
+    return (out_g1, out_g2)
+
+class GalEncoder:
+    ''' FEC encoder for the Galilelo GNSS. For reference see section 4.1.4 in the
+    Galilelo ICD.'''
+    def __init__(self, input_bits, invert_second_branch = False):
+        # As per Galilelo ICD (p. 24, Figure 13), the second branch of the
+        # encoder is inverted. This implementation is a bit more flexible and
+        # allows the have this inversion on and off. Use this parameter to
+        # control it.
+        self.invert_second_branch = invert_second_branch
+        self.input_bits = input_bits
+        self.output_bits = np.zeros(2*len(input_bits))
 
     def encode(self):
+        ''' Encodes self.input_bits and saves the result in self.output_bits.'''
+        # As per section 4.2.2.2, the tail bits field consists of 6 zero-value
+        # bits enabling completion of the FEC decoding. In other words, the
+        # encoder's delay line is initialised with 0s.
         prev_val = [0] * 6
 
-        for index, input_val in enumerate(self.data_bits):
-            out1, out2 = self.poly_eval(prev_val, input_val)
+        for index, input_val in enumerate(self.input_bits):
+            out1, out2 = encode_single_bit(input_val, prev_val)
             self.output_bits[2*index] = out1
             self.output_bits[2*index+1] = out2
 
@@ -305,15 +314,35 @@ class GalConvCode:
                 if ind % 2 == 1:
                     self.output_bits[ind] = int(not bool(self.output_bits[ind]))
 
+        # Transform hard bits to soft bits. Apologies, the mapping is a bit
+        # arbitrary
         f = lambda x:-1 if x == 1 else 1
         self.output_bits = [f(x) for x in self.output_bits]
 
-    def decode(self, msg):
+
+class GalDecoder:
+    ''' Trelis decoder for the Galilelo GNSS signal.'''
+    def __init__(self, input_bits, invert_second_branch = False):
+        # As per Galilelo ICD (p. 24, Figure 13), the second branch of the
+        # encoder is inverted. This implementation is a bit more flexible and
+        # allows the have this inversion on and off. Use this parameter to
+        # control it.
+        self.invert_second_branch = invert_second_branch
+        self.input_bits = input_bits
+        self.output_bits = np.zeros(2*len(input_bits))
+
+    def decode(self):
+        ''' Decodes self.input_bits and saves the result in self.output_bits.
+        It basically implements Viterbi decoding as described here:
+        http://web.mit.edu/6.02/www/f2010/ '''
+
+        # Soft to hard transformation. Apologies, the mapping is a bit
+        # arbitrary (matches the encoder implemented in this file).
         f = lambda x:1 if x == -1 else 0
-        msg = [f(x) for x in msg]
-        print(msg)
+        msg = [f(x) for x in self.input_bits]
 
         class TrelisNode:
+           ''' Represents a node in the trelis used for decoding.'''
            def  __init__(self, visited, error, ancestor):
                 self.visited = visited
                 self.error = error
@@ -322,71 +351,53 @@ class GalConvCode:
            def __str__(self):
                return "".join([str(self.visited), ' {:^3} '.format(str(self.error)), str(self.ancestor)])
 
+        # All possible states
+        states = list(itertools.product([0, 1], repeat=6))
 
-        trelis = [[TrelisNode(0, math.inf, 0) for n in range(64)] for nn in range(int(len(msg)/2 + 1))]
-        # trelis = [[TrelisNode(0, math.inf, 0) for n in range(64)] for nn in range(10)]
+        # The trelis
+        trelis = [[TrelisNode(0, math.inf, 0) for n in range(len(states))] for nn in range(int(len(msg)/2 + 1))]
+
+        # We start from 'all 0s' state
         trelis[0][0].visited = 1
 
-        # states = [[].append(seq) for seq in itertools.product([0,1], repeat=6)]
-        states_str = ["".join(seq) for seq in itertools.product("01", repeat=6)]
-        states = [list(word) for word in states_str]
-
-        for ii, column in enumerate(trelis[:-1]):
+        # Each column in trelis corresponds to the current state (which in
+        # theory can be any of the possible states) and contains TrelisNodes.
+        # Each node corresponds to one state.  Since it's not possible to
+        # transition from the final state, exclude that column from the loop.
+        for column_idx, column in enumerate(trelis[:-1]):
+            # Loop over all possible states in the current column
             for current_state_idx, node in enumerate(column):
+                # Note that if the previous step not a single state
+                # transitioned into this step then we can skipped it (i.e. it's
+                # not reachable). Otherwise proceed.
                 if 1 == node.visited:
-                    # THESE INDICES ARE WRONG!!!
-                    idx_1 = 2*ii
-                    idx_2 = 2*ii + 1
+                    # Message bits corresponding to this column in the trelis
+                    msg_bit_1 = msg[2*column_idx]
+                    msg_bit_2 = msg[2*column_idx+1]
 
-                    state_temp = [int(n) for n in states[current_state_idx]]
-                    out = self.poly_eval(state_temp, 0)
-                    error = abs(msg[idx_1] - out[0]) + abs(msg[idx_2] - out[1])
-                    # print("MESSAGE {} {}".format(msg[idx_1], msg[idx_2]))
+                    for next_bit in [0, 1]:
+                        out = encode_single_bit(next_bit, states[current_state_idx])
+                        error = abs(msg_bit_1 - out[0]) + abs(msg_bit_2 - out[1])
 
-                    # The affected state
-                    state_new_zero = states[current_state_idx][:-1]
-                    state_new_zero.insert(0, '0')
-                    next_state_idx = states.index(state_new_zero)
+                        next_state = list(states[current_state_idx][:-1])
+                        next_state.insert(0, next_bit)
+                        next_state_idx = states.index(tuple(next_state))
 
-                    prev_error = 0 if trelis[ii][current_state_idx].error == math.inf else trelis[ii][current_state_idx].error
-                    if (error + prev_error) < trelis[ii+1][next_state_idx].error:
-                        trelis[ii+1][next_state_idx].visited = 1
-                        trelis[ii+1][next_state_idx].ancestor = current_state_idx
-                        trelis[ii+1][next_state_idx].error = error + prev_error
-                        # print("COLUMN: {} CURRENT STATE: {} NEXT STATE: {} ERROR: {} STATE: {}".format(ii, current_state_idx, next_state_idx, trelis[ii+1][next_state_idx].error, state_new_zero))
+                        prev_error = 0 if trelis[column_idx][current_state_idx].error == math.inf else trelis[column_idx][current_state_idx].error
+                        if (error + prev_error) < trelis[column_idx+1][next_state_idx].error:
+                            trelis[column_idx+1][next_state_idx].visited = 1
+                            trelis[column_idx+1][next_state_idx].ancestor = current_state_idx
+                            trelis[column_idx+1][next_state_idx].error = error + prev_error
 
-                    state_temp = [int(n) for n in states[current_state_idx]]
-                    out = self.poly_eval(state_temp, 1)
-                    error = abs(msg[idx_1] - out[0]) + abs(msg[idx_2] - out[1])
-
-                    # The affected state
-                    state_new_one = states[current_state_idx][:-1]
-                    state_new_one.insert(0, '1')
-                    next_state_idx = states.index(state_new_one)
-
-                    prev_error = 0 if trelis[ii][current_state_idx].error == math.inf else trelis[ii][current_state_idx].error
-                    if (error + prev_error) < trelis[ii+1][next_state_idx].error:
-                        trelis[ii+1][next_state_idx].visited = 1
-                        trelis[ii+1][next_state_idx].ancestor = current_state_idx
-                        trelis[ii+1][next_state_idx].error = error + prev_error
-                        # print("COLUMN: {} CURRENT STATE: {} NEXT STATE: {} ERROR: {} STATE: {}".format(ii, current_state_idx, next_state_idx, trelis[ii+1][next_state_idx].error, state_new_one))
 
         values = [value for value in trelis[len(trelis)-1] if value.error == 0]
         idx_start = trelis[len(trelis)-1].index(values[0])
-        print(values)
-        print("TATATATATA")
         msg_tx = []
-        print(msg_tx)
         for column in reversed(trelis[1:]):
             print(states[idx_start][0], idx_start)
             # TODO Better deal with int vs char
             msg_tx.insert(0, int(states[idx_start][0]))
             idx_start = column[idx_start].ancestor
-        column = trelis[len(trelis)-1]
-        # for item in column:
-        #     print(item.error)
-        # print(msg_tx)
-        # print(len(msg_tx))
         return(msg_tx)
 
 def func():
@@ -397,7 +408,7 @@ def func():
             1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0]
     # data_in = [ 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0]
-    encoder = GalConvCode(data_in)
+    encoder = GalDecoder(data_in)
     encoder.encode()
     print(encoder.output_bits)
 
