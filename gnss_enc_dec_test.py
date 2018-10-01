@@ -1,4 +1,7 @@
-from decoder import GalDecoder, GalEncoder
+''' Unit tests for the GalEncoder and GalDecoder
+'''
+
+from gnss import GalDecoder, GalEncoder
 
 DATA_DECODED = [
     [1,0,0,0,1,1,0,0,1,1,1,1,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,0,1,1,1,0,1,0,0,1,0,0,1,0,0,1,0,1,0,0,0,0,0,1,0,1,1,1,1,1,1,1,1,0,1,0,0,0,0,0,0],
@@ -36,6 +39,7 @@ DATA_ENCODED = [
     [-1,-1,-1,1,-1,-1,-1,-1,-1,-1,1,1,-1,1,1,1,1,1,1,1,1,1,-1,1,-1,1,1,-1,-1,1,1,1,-1,1,1,-1,1,-1,1,-1,1,1,1,-1,-1,1,-1,-1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,-1,-1,-1,1,1,1,1,-1,1,1,1,1,-1,-1,1,1,-1,-1,1,1,-1,-1,1,1,-1,-1,1,1,-1,-1,1,1,-1,-1,1,1,-1,-1,1,1,-1,-1,1,1,1,1,1,-1,1,-1,1,-1,-1,1,1,1,1,1,-1,-1,-1,-1,1,-1,1,1,1,-1,1,-1,-1,1,-1,-1,-1,-1,1,1,-1,1,1,1,-1,1,-1,-1,-1,-1,-1,1,1,-1,-1,1,-1,-1,1,1,-1,-1,1,1,-1,-1,-1,1,1,1,1,1,1,-1,-1,-1,1,-1,1,-1,-1,-1,1,-1,-1,-1]
 ]
 
+
 def test_encoding():
     for idx, data in enumerate(DATA_DECODED):
         encoder = GalEncoder(DATA_DECODED[idx])
@@ -43,12 +47,14 @@ def test_encoding():
 
         assert encoder.output_bits == DATA_ENCODED[idx]
 
+
 def test_decoding():
     for idx, data in enumerate(DATA_ENCODED):
         encoder = GalDecoder(DATA_ENCODED[idx])
         msg_tx = encoder.decode()
 
         assert msg_tx == DATA_DECODED[idx]
+
 
 def test_encoder_smoke_test():
     # The message length is irrelevant here

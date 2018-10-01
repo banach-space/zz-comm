@@ -1,7 +1,13 @@
 #! /usr/bin/env python
 '''
-Hamming encoding and decoding for GLONASS as specified in the GLONASS ICD,
-Edition 5.1, Section 4.7.
+Encoding and decoding for GNSS systems. Currently only GLONASS and Galilelo are
+supported.
+
+The following encoding/decoding algorithms are implemented:
+1. Hamming encoding and decoding for GLONASS as specified in the GLONASS ICD,
+   Edition 5.1, Section 4.7.
+2. FEC encoding and Viterbi decoding as specified in the Galilelo ICD Issue
+   1.3, December 2016, Section 4.1.4.
 '''
 
 import sys
