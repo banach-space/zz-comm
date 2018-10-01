@@ -15,7 +15,7 @@
 #include <boggle-api.h>
 #include <iostream>
 #include <solver.h>
-#include <string.h>
+#include <cstring>
 #include <trie.h>
 #include <vector>
 
@@ -25,7 +25,7 @@ using namespace Boggle;
 // can't see how to achieve it with this API.
 std::unique_ptr<Trie> pTrie;
 
-void LoadDictionary(const char *path) {
+void BoggleResults::LoadDictionary(const char *path) {
   if (pTrie != nullptr) {
     std::cerr << "[boggle-api:] Failed to load a dictionary. Free the current "
                  "dictionary first!"
@@ -38,14 +38,14 @@ void LoadDictionary(const char *path) {
   pTrie = trie_build.Get();
 }
 
-void FreeDictionary() {
+void BoggleResults::FreeDictionary() {
   // Delete/free the dictionary
   pTrie.reset();
   if (pTrie != nullptr)
     std::cerr << "[boggle-api:] Failed to free the dictionary." << std::endl;
 }
 
-Results FindWords(const char *board, unsigned width, unsigned height) {
+void BoggleResults::FindWords(const char *board, unsigned width, unsigned height) {
   // Assumption: we don't care about the case
   bool case_sensitive = false;
 
@@ -58,35 +58,33 @@ Results FindWords(const char *board, unsigned width, unsigned height) {
                 SolverAlgorithm::kMultiThreaded);
   solver.Run();
 
-  // Copy the score from the solver into Results
-  Results result;
-  result.Count = solver.GetNumberOfWords();
-  result.Score = solver.GetNumberOfPoints();
+  // Copy the score from the solver into BoggleResults
+  count = solver.GetNumberOfWords();
+  score = solver.GetNumberOfPoints();
 
-  // Copy the words from the solver into Results
-  std::vector<std::string> words = solver.GetWords();
+  // Copy the words from the solver into BoggleResults
+  std::vector<std::string> words_temp = solver.GetWords();
 
-  char **pointerVec = new char *[result.Count];
-  for (size_t i = 0; i < result.Count; i++) {
+  char **pointerVec = new char *[count];
+  for (size_t i = 0; i < count; i++) {
     // `+1` in the following is for the terminating NULL character.
-    pointerVec[i] = new char[words[i].length() + 1];
-    strncpy(pointerVec[i], words[i].c_str(), words[i].length() + 1);
+    pointerVec[i] = new char[words_temp[i].length() + 1];
+    strncpy(pointerVec[i], words_temp[i].c_str(), words_temp[i].length() + 1);
   }
-  result.Words = pointerVec;
 
-  return result;
+  words = pointerVec;
 }
 
-void FreeWords(Results results) {
+void BoggleResults::FreeWords() {
   // Clear the words
-  for (size_t i = 0; i < results.Count; i++)
-    delete[] results.Words[i];
+  for (size_t i = 0; i < count; i++)
+    delete[] words[i];
 
-  delete[] results.Words;
+  delete[] words;
 
   // Reset the remaining bits in results. This is rather pointless as results is
   // being passed by value.
-  results.Words = nullptr;
-  results.Count = 0;
-  results.Score = 0;
+  words = nullptr;
+  count = 0;
+  score = 0;
 }
